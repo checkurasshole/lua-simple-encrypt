@@ -1,22 +1,21 @@
 local Module = {}
 
 local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local VirtualUser = game:GetService("VirtualUser")
 local RunService = game:GetService("RunService")
-local LocalPlayer = Players.LocalPlayer
 local Bridge = ReplicatedStorage:WaitForChild("Bridge")
 
-local upvr
+Module.upvr = nil
 pcall(function()
-    upvr = require(LocalPlayer.PlayerScripts.MetaService)
+    Module.upvr = require(LocalPlayer.PlayerScripts.MetaService)
 end)
 
 getgenv().AutoRank = false
 getgenv().AutoAttack = false
 getgenv().GrabDrops = false
 getgenv().AutoBuyZone = false
-getgenv().AutoAr = false
 getgenv().AntiAFK = false
 getgenv().AutoAttackNearest = false
 getgenv().AutoEquipBest = false
@@ -31,9 +30,6 @@ getgenv().PriorityBosses = {}
 getgenv().AutoFarmBosses = false
 getgenv().AutoAuras = false
 getgenv().AutoRaidFarm = false
-getgenv().AutoEnchant = false
-getgenv().EnchantWeapon = ""
-getgenv().CrystalCost = 50
 
 Module.selectedEnemies = {}
 Module.currentTargets = {}
@@ -42,15 +38,14 @@ Module.unequippedPets = {}
 Module.isTeleporting = false
 Module.currentPriorityBoss = nil
 Module.isInRaid = false
-Module.weaponsCache = {}
 
 Module.eggMaps = {
-    "Volcano", "Swordsman Village", "Subway", "Spirit", "Shantytown", "Shadow Castle",
-    "Sayan Valley", "Sands", "Sacred Forest", "Orc Sanctuary", "Ninja Village",
-    "Nightmare Hollow", "Murimu Village", "Mines", "Lost Temple", "Lobby", "Grand Sea",
-    "Goblins Caves", "Gloomridge", "Frozen Forest", "Fireworkers", "Fiery World",
-    "Dungeon_Lobby", "Divine Garden", "Demonic World", "City Raid Return", "City",
-    "Ant Island", "Anthill", "Cairo"
+    "Volcano", "Swordsman Village", "Subway", "Spirit", "Shantytown",
+    "Shadow Castle", "Sayan Valley", "Sands", "Sacred Forest", "Orc Sanctuary",
+    "Ninja Village", "Nightmare Hollow", "Murimu Village", "Mines", "Lost Temple",
+    "Lobby", "Grand Sea", "Goblins Caves", "Gloomridge", "Frozen Forest",
+    "Fireworkers", "Fiery World", "Dungeon_Lobby", "Divine Garden", "Demonic World",
+    "City Raid Return", "City", "Ant Island", "Anthill", "Cairo"
 }
 
 Module.raidList = {
@@ -58,13 +53,7 @@ Module.raidList = {
     "Raid_Crazy", "Raid_Crystal", "Raid_DemonSlayer", "Raid_Insane", "Raid_Abuse"
 }
 
-Module.zoneList = {
-    "Volcano", "Swordsman Village", "Subway", "Spirit", "Shantytown", "Shadow Castle",
-    "Sayan Valley", "Sands", "Sacred Forest", "Orc Sanctuary", "Ninja Village",
-    "Nightmare Hollow", "Murimu Village", "Mines", "Lost Temple", "Grand Sea",
-    "Goblins Caves", "Gloomridge", "Frozen Forest", "Fireworkers", "Fiery World",
-    "Divine Garden", "Demonic World", "City", "Ant Island", "Anthill", "Cairo"
-}
+Module.weaponsCache = {}
 
 function Module.getCharacter()
     return LocalPlayer.Character
@@ -330,8 +319,8 @@ end
 function Module.updateUnequippedPets()
     Module.unequippedPets = {}
     pcall(function()
-        for petUID, petData in pairs(upvr.Data.Pets or {}) do
-            local isEquipped = upvr.Data.PetsEquipped[petUID] ~= nil
+        for petUID, petData in pairs(Module.upvr.Data.Pets or {}) do
+            local isEquipped = Module.upvr.Data.PetsEquipped[petUID] ~= nil
             if not isEquipped then
                 table.insert(Module.unequippedPets, petUID)
             end
@@ -351,7 +340,7 @@ function Module.parseNumbers(input)
         if noCommas ~= "" and isNumeric(str) then
             return tonumber(noCommas)
         else
-            return upvr.Utils.Number:Unformat(str)
+            return Module.upvr.Utils.Number:Unformat(str)
         end
     end
     local num1 = safeTonumber(part1)
@@ -424,11 +413,8 @@ function Module.equipWeapon(weaponName)
     end
 end
 
-function Module.updateWeaponDropdown()
+function Module.updateWeaponDropdown(weaponsList)
     Module.weaponsCache = {}
-    
-    local playerGui = LocalPlayer:WaitForChild("PlayerGui")
-    local weaponsList = playerGui:WaitForChild("UI").Frames.Inventory.NewMain.body.lists.Weapons.list
     
     for _, child in pairs(weaponsList:GetChildren()) do
         if child:IsA("Frame") and child.Visible then
@@ -457,7 +443,60 @@ function Module.updateWeaponDropdown()
     return dropdownValues
 end
 
-function Module.initLoops()
+function Module.giveShadowEssence(amount)
+    local args = {
+        [1] = "ShadowEssence",
+        [2] = "CrystalCollect",
+        [3] = {
+            ["Amount"] = amount
+        }
+    }
+    
+    ReplicatedStorage:WaitForChild("Bridge", 9e9):FireServer(unpack(args))
+end
+
+function Module.setupEventConnections()
+    local enemiesFolder = workspace:WaitForChild("Client"):WaitForChild("Enemies")
+    
+    for _, folder in pairs(Module.getAllEnemyFolders()) do
+        folder.ChildRemoved:Connect(function(removed)
+            for i, target in ipairs(Module.currentTargets) do
+                if target == removed then
+                    table.remove(Module.currentTargets, i)
+                    break
+                end
+            end
+            if removed == Module.currentTargetNearest then
+                Module.currentTargetNearest = nil
+            end
+            if removed == Module.currentPriorityBoss then
+                Module.currentPriorityBoss = nil
+            end
+        end)
+    end
+    
+    enemiesFolder.ChildAdded:Connect(function(newFolder)
+        if newFolder:IsA("Folder") then
+            task.wait(0.1)
+            newFolder.ChildRemoved:Connect(function(removed)
+                for i, target in ipairs(Module.currentTargets) do
+                    if target == removed then
+                        table.remove(Module.currentTargets, i)
+                        break
+                    end
+                end
+                if removed == Module.currentTargetNearest then
+                    Module.currentTargetNearest = nil
+                end
+                if removed == Module.currentPriorityBoss then
+                    Module.currentPriorityBoss = nil
+                end
+            end)
+        end
+    end)
+end
+
+function Module.startAntiAFK()
     spawn(function()
         while task.wait(120) do
             if getgenv().AntiAFK then
@@ -468,39 +507,25 @@ function Module.initLoops()
             end
         end
     end)
-
+    
     LocalPlayer.Idled:Connect(function()
         if getgenv().AntiAFK then
             VirtualUser:CaptureController()
             VirtualUser:ClickButton2(Vector2.new())
         end
     end)
+end
 
-    spawn(function() 
-        while task.wait(1) do
-            if getgenv().AutoAr then
-                pcall(function()
-                    for _, v in next, LocalPlayer.PlayerGui.UI.Frames.Achievements.NewMain.body.items:GetChildren() do
-                        if not v:IsA("ImageLabel") then continue end
-                        if v.claimed.Visible then continue end 
-                        local num1, num2 = Module.parseNumbers(v.backFill.progress.Text)
-                        if num1 and num2 and num1 < num2 then continue end
-                        Bridge:FireServer("Achievements", "Claim", v.Name)
-                    end
-                end)
-            end
-        end
-    end)
-
+function Module.startAutoRank()
     spawn(function()
         while task.wait(1) do
             if getgenv().AutoRank then
                 pcall(function()
-                    local Data = upvr.Data
+                    local Data = Module.upvr.Data
                     local Energy = Data.Energy
                     local nextRank = Data.Rank + 1
-                    if upvr.SharedModules.Ranks[nextRank] then
-                        local required = upvr.Utils.Number:Unformat(upvr.SharedModules.Ranks[nextRank].Price)
+                    if Module.upvr.SharedModules.Ranks[nextRank] then
+                        local required = Module.upvr.Utils.Number:Unformat(Module.upvr.SharedModules.Ranks[nextRank].Price)
                         if Energy >= required then
                             Bridge:FireServer("RankUp", "Evolve")
                         end
@@ -509,7 +534,9 @@ function Module.initLoops()
             end
         end
     end)
+end
 
+function Module.startAutoAuras()
     spawn(function()
         while task.wait(1) do
             if getgenv().AutoAuras then
@@ -523,36 +550,29 @@ function Module.initLoops()
             end
         end
     end)
+end
 
+function Module.startAutoBuyZone()
     spawn(function() 
         while task.wait(2) do
             if getgenv().AutoBuyZone then
                 pcall(function()
-                    local Data = upvr.Data
-                    local last = nil
-                    for i,v in pairs(Data.Inventory.Maps) do
-                        last = i
-                    end
-                    local index = upvr.SharedModules.Maps[last].Index
-                    local nextArea = nil
-                    for i,v in pairs(upvr.SharedModules.Maps) do
-                        for f,s in pairs(v) do
-                            if f == 'Index' and s == index + 1 then 
-                                nextArea = v
-                            end
-                        end
-                    end
-                    if not nextArea then return end
-                    if Data.Gems >= upvr.Utils.Number:Unformat(nextArea.Price) then
-                        Bridge:FireServer("Teleport","Buy",nextArea.Name)
-                        task.wait(0.5)
-                        Bridge:FireServer("Teleport","Spawn",nextArea.Name)
+                    for _, zoneName in pairs(Module.eggMaps) do
+                        local args = {
+                            [1] = "Teleport",
+                            [2] = "Buy",
+                            [3] = zoneName
+                        }
+                        game:GetService("ReplicatedStorage"):WaitForChild("Bridge", 9e9):FireServer(unpack(args))
+                        task.wait(0.1)
                     end
                 end)
             end
         end
     end)
+end
 
+function Module.startAutoEquipBest()
     spawn(function()
         while task.wait(getgenv().EquipInterval) do
             if getgenv().AutoEquipBest then
@@ -563,7 +583,9 @@ function Module.initLoops()
             end
         end
     end)
+end
 
+function Module.startAutoRollEggs()
     spawn(function()
         while task.wait(1) do
             if getgenv().AutoRollEggs then
@@ -582,7 +604,9 @@ function Module.initLoops()
             end
         end
     end)
+end
 
+function Module.startAutoJoinRaid()
     spawn(function()
         while task.wait(60) do
             if getgenv().AutoJoinRaid then
@@ -606,7 +630,9 @@ function Module.initLoops()
             end
         end
     end)
+end
 
+function Module.startAutoRaidFarm(Toggles)
     spawn(function()
         while task.wait(2) do
             if getgenv().AutoRaidFarm then
@@ -614,8 +640,10 @@ function Module.initLoops()
                 
                 if inRaid and not Module.isInRaid then
                     Module.isInRaid = true
+                    Toggles.AutoAttackNearest:SetValue(true)
                 elseif not inRaid and Module.isInRaid then
                     Module.isInRaid = false
+                    Toggles.AutoAttackNearest:SetValue(false)
                 end
             else
                 if Module.isInRaid then
@@ -624,28 +652,9 @@ function Module.initLoops()
             end
         end
     end)
+end
 
-    spawn(function()
-        while task.wait(1) do
-            if getgenv().AutoEnchant then
-                pcall(function()
-                    if getgenv().EnchantWeapon ~= "" then
-                        local args = {
-                            [1] = "EnchantWeapon",
-                            [2] = "ScrollTry10",
-                            [3] = {
-                                ["CurrentSword"] = getgenv().EnchantWeapon,
-                                ["IsCraftButton10"] = true,
-                                ["CrystalCost"] = getgenv().CrystalCost,
-                            }
-                        }
-                        ReplicatedStorage:WaitForChild("Bridge", 9e9):FireServer(unpack(args))
-                    end
-                end)
-            end
-        end
-    end)
-
+function Module.startDropCollection()
     workspace.Debris.ChildAdded:Connect(function(part)
         if getgenv().GrabDrops and part:IsA('Part') and part:FindFirstChild("UID") then
             pcall(function()
@@ -656,7 +665,7 @@ function Module.initLoops()
     end)
 end
 
-function Module.initHeartbeat(Toggles)
+function Module.startMainGameLoop(Toggles)
     game:GetService("RunService").Heartbeat:Connect(function()
         pcall(function()
             Module.updateUnequippedPets()
@@ -674,8 +683,8 @@ function Module.initHeartbeat(Toggles)
                 Module.teleportToTarget(Module.currentPriorityBoss)
                 if Toggles.AutoAttack.Value then
                     pcall(function()
-                        if upvr.Cache and upvr.Cache.ProximityEnemy then
-                            Bridge:FireServer("Attack", "Click", upvr.Cache.ProximityEnemy)
+                        if Module.upvr.Cache and Module.upvr.Cache.ProximityEnemy then
+                            Bridge:FireServer("Attack", "Click", Module.upvr.Cache.ProximityEnemy)
                         end
                     end)
                 end
@@ -737,49 +746,8 @@ function Module.initHeartbeat(Toggles)
         
         if Toggles.AutoAttack.Value and not Toggles.AutoFarmBosses.Value then
             pcall(function()
-                if upvr.Cache and upvr.Cache.ProximityEnemy then
-                    Bridge:FireServer("Attack", "Click", upvr.Cache.ProximityEnemy)
-                end
-            end)
-        end
-    end)
-end
-
-function Module.initEnemyTracking()
-    local enemiesFolder = workspace:WaitForChild("Client"):WaitForChild("Enemies")
-
-    for _, folder in pairs(Module.getAllEnemyFolders()) do
-        folder.ChildRemoved:Connect(function(removed)
-            for i, target in ipairs(Module.currentTargets) do
-                if target == removed then
-                    table.remove(Module.currentTargets, i)
-                    break
-                end
-            end
-            if removed == Module.currentTargetNearest then
-                Module.currentTargetNearest = nil
-            end
-            if removed == Module.currentPriorityBoss then
-                Module.currentPriorityBoss = nil
-            end
-        end)
-    end
-
-    enemiesFolder.ChildAdded:Connect(function(newFolder)
-        if newFolder:IsA("Folder") then
-            task.wait(0.1)
-            newFolder.ChildRemoved:Connect(function(removed)
-                for i, target in ipairs(Module.currentTargets) do
-                    if target == removed then
-                        table.remove(Module.currentTargets, i)
-                        break
-                    end
-                end
-                if removed == Module.currentTargetNearest then
-                    Module.currentTargetNearest = nil
-                end
-                if removed == Module.currentPriorityBoss then
-                    Module.currentPriorityBoss = nil
+                if Module.upvr.Cache and Module.upvr.Cache.ProximityEnemy then
+                    Bridge:FireServer("Attack", "Click", Module.upvr.Cache.ProximityEnemy)
                 end
             end)
         end
